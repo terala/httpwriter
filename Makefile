@@ -27,6 +27,7 @@ test: $(GO_FILES) outdir
 
 .PHONY: coverage_file
 $(OUTDIR)/coverage.out: $(GO_FILES) test
+coverage_file: $(OUTDIR)/coverage.out
 
 .PHONY: coverage
 coverage: coverage_file

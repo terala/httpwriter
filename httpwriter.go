@@ -5,20 +5,33 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
+	"os"
+	"strconv"
 	"time"
 )
 
-const defaultBufferCap = 1024
-const defaultBatchSize = 5
-const MimeTypeApplicationJson = "application/json"
-const HeaderContentType = "Content-Type"
+const (
+	MimeTypeApplicationJson = "application/json"
+	HeaderContentType       = "Content-Type"
+
+	defaultBufferCap       = 1024
+	defaultBatchSize       = 5
+	defaultMaxIdleConn     = 5
+	defaultIdleConnTimeout = 30 * time.Second
+	defaultWriteBufferSize = 1 * 1024 * 1024
+)
 
 type HttpWriterErrorFunc func(string, error)
 
 type HttpWriterOptions struct {
-	BufferCapacity int
-	BatchSize      int
-	ErrorFunc      HttpWriterErrorFunc
+	HttpEndpoint       string
+	BufferCapacity     int
+	BatchSize          int
+	ErrorFunc          HttpWriterErrorFunc
+	MaxIdleConnections int
+	IdleConnTimeout    time.Duration
+	WriteBufferSize    int
 }
 
 type HttpWriter struct {
@@ -33,13 +46,71 @@ func noopError(string, error) {
 	// Nothing to do
 }
 
-func New(ctx context.Context, httpEndpoint string, options *HttpWriterOptions) *HttpWriter {
-	opt := HttpWriterOptions{
-		BufferCapacity: defaultBufferCap,
-		ErrorFunc:      noopError,
-		BatchSize:      defaultBatchSize,
+func defaultConfig() (*HttpWriterOptions, error) {
+	opt := &HttpWriterOptions{
+		HttpEndpoint:       "",
+		BufferCapacity:     defaultBufferCap,
+		BatchSize:          defaultBatchSize,
+		ErrorFunc:          noopError,
+		MaxIdleConnections: defaultMaxIdleConn,
+		IdleConnTimeout:    defaultIdleConnTimeout,
+		WriteBufferSize:    defaultWriteBufferSize,
 	}
+
+	err := error(nil)
+
+	// Update base options from environment.
+	if val := os.Getenv("HTTP_WRITER_ENDPOINT"); val != "" {
+		u, err := url.Parse(val)
+		if err != nil {
+			return nil, err
+		}
+		opt.HttpEndpoint = u.String()
+	}
+	if val := os.Getenv("HTTP_WRITER_BUFFER_CAPACITY"); val != "" {
+		opt.BufferCapacity, err = strconv.Atoi(val)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if val := os.Getenv("HTTP_WRITER_BATCH_SIZE"); val != "" {
+		opt.BatchSize, err = strconv.Atoi(val)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if val := os.Getenv("HTTP_WRITER_MAX_IDLE_CONNECTIONS"); val != "" {
+		opt.MaxIdleConnections, err = strconv.Atoi(val)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if val := os.Getenv("HTTP_WRITER_IDLE_CONN_TIMEOUT"); val != "" {
+		opt.IdleConnTimeout, err = time.ParseDuration(val)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if val := os.Getenv("HTTP_WRITER_WRITE_BUFFER_SIZE"); val != "" {
+		opt.WriteBufferSize, err = strconv.Atoi(val)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return opt, err
+}
+
+func New(ctx context.Context, options *HttpWriterOptions) (*HttpWriter, error) {
+	opt, err := defaultConfig()
 	if options != nil {
+		if options.HttpEndpoint != "" {
+			u, err := url.Parse(options.HttpEndpoint)
+			if err != nil {
+				return nil, err
+			}
+			opt.HttpEndpoint = u.String()
+		}
 		if options.ErrorFunc != nil {
 			opt.ErrorFunc = options.ErrorFunc
 		}
@@ -49,23 +120,32 @@ func New(ctx context.Context, httpEndpoint string, options *HttpWriterOptions) *
 		if options.BatchSize > 0 {
 			opt.BatchSize = options.BatchSize
 		}
+		if options.MaxIdleConnections > 0 {
+			opt.MaxIdleConnections = options.MaxIdleConnections
+		}
+		if options.IdleConnTimeout > 0 {
+			opt.IdleConnTimeout = options.IdleConnTimeout
+		}
+		if options.WriteBufferSize > 0 {
+			opt.WriteBufferSize = options.WriteBufferSize
+		}
 	}
 	s := HttpWriter{
 		ctx:          ctx,
-		httpEndpoint: httpEndpoint,
-		options:      opt,
+		httpEndpoint: opt.HttpEndpoint,
+		options:      *opt,
 		client: &http.Client{
 			Transport: &http.Transport{
 				DisableKeepAlives: false,
-				MaxIdleConns:      5,
-				IdleConnTimeout:   60 * time.Second,
-				WriteBufferSize:   1 * 1024 * 1024, // 1MB buffer
+				MaxIdleConns:      opt.MaxIdleConnections,
+				IdleConnTimeout:   opt.IdleConnTimeout,
+				WriteBufferSize:   opt.WriteBufferSize,
 			},
 		},
 		ch: make(chan []byte, opt.BufferCapacity),
 	}
 	go s.run()
-	return &s
+	return &s, err
 }
 
 func (s *HttpWriter) Write(p []byte) (n int, err error) {

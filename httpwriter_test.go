@@ -89,7 +89,9 @@ func (s *HttpWriterTestSuite) Test_write_one_line() {
 	const value2 = "value2"
 
 	line := fmt.Sprintf("{\"%s\":\"%s\",\"%s\":\"%s\"}", key1, value1, key2, value2)
-	w := httpwriter.New(s.ctx, s.mockServer.URL, nil)
+	w, _ := httpwriter.New(s.ctx, &httpwriter.HttpWriterOptions{
+		HttpEndpoint: s.mockServer.URL,
+	})
 
 	// Act
 	_, _ = w.Write([]byte(line))
@@ -164,8 +166,9 @@ func (s *HttpWriterTestSuite) runTest(count int, bufferSize int, batchSize int) 
 	options := httpwriter.HttpWriterOptions{
 		BufferCapacity: bufferSize,
 		BatchSize:      batchSize,
+		HttpEndpoint:   s.mockServer.URL,
 	}
-	w := httpwriter.New(s.ctx, s.mockServer.URL, &options)
+	w, _ := httpwriter.New(s.ctx, &options)
 
 	// Act
 	for i := 0; i < count; i++ {
@@ -230,10 +233,11 @@ func (s *HttpWriterTestSuite) Test_error_func_is_invoked_upon_errors() {
 					msg = s
 					err <- e
 				},
+				HttpEndpoint: tt.url,
 			}
 
 			// Act
-			w := httpwriter.New(s.ctx, tt.url, &options)
+			w, _ := httpwriter.New(s.ctx, &options)
 			_, _ = w.Write([]byte("{\"key\":\"value\"}"))
 			er := <-err // Wait until error is available.
 			s.cancel()
@@ -247,7 +251,9 @@ func (s *HttpWriterTestSuite) Test_error_func_is_invoked_upon_errors() {
 
 func (s *HttpWriterTestSuite) Test_slog_integration() {
 	// Arrange
-	w := httpwriter.New(s.ctx, s.mockServer.URL, nil)
+	w, _ := httpwriter.New(s.ctx, &httpwriter.HttpWriterOptions{
+		HttpEndpoint: s.mockServer.URL,
+	})
 	jsonHandler := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
@@ -276,8 +282,9 @@ func (s *HttpWriterTestSuite) Test_is_cancellable_by_context() {
 	options := httpwriter.HttpWriterOptions{
 		BatchSize:      5,
 		BufferCapacity: 250,
+		HttpEndpoint:   s.mockServer.URL,
 	}
-	w := httpwriter.New(s.ctx, s.mockServer.URL, &options)
+	w, _ := httpwriter.New(s.ctx, &options)
 	jsonHandler := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
@@ -296,37 +303,6 @@ func (s *HttpWriterTestSuite) Test_is_cancellable_by_context() {
 	verify.That(s.T(), len(s.jsonLines)).IsLessOrEqualTo(count)
 }
 
-func (s *HttpWriterTestSuite) Test_external_slog_roundtrip() {
-	// Arrange
-	const count = 25
-	err := make(chan error)
-	errorMsg := ""
-	options := httpwriter.HttpWriterOptions{
-		ErrorFunc: func(s string, e error) {
-			errorMsg = s
-			err <- e
-		},
-		BufferCapacity: 3,
-		BatchSize:      5,
-	}
-	w := httpwriter.New(s.ctx, "http://localhost:8888/", &options)
-	jsonHandler := slog.NewJSONHandler(w, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	})
-	logger := slog.New(jsonHandler)
-	msg := "SLog -> FluentBit"
-
-	// Act
-	for i := 0; i < count; i++ {
-		logger.Info(fmt.Sprintf("%s : %d", msg, i), slog.Int("counter", i))
-	}
-	time.Sleep(1 * time.Second)
-	s.cancel()
-
-	// Assert
-	verify.That(s.T(), errorMsg).IsEmpty()
-}
-
 func (s *HttpWriterTestSuite) Test_errors_are_reported_for_non_201_response() {
 	// Arrange
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -341,8 +317,9 @@ func (s *HttpWriterTestSuite) Test_errors_are_reported_for_non_201_response() {
 			msg = s
 			err = e
 		},
+		HttpEndpoint: mockServer.URL,
 	}
-	w := httpwriter.New(s.ctx, mockServer.URL, &options)
+	w, _ := httpwriter.New(s.ctx, &options)
 	jsonHandler := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
@@ -360,4 +337,39 @@ func (s *HttpWriterTestSuite) Test_errors_are_reported_for_non_201_response() {
 
 func Test_HttpWriter(t *testing.T) {
 	suite.Run(t, new(HttpWriterTestSuite))
+}
+
+func Test_external_slog_roundtrip(t *testing.T) {
+	t.Skip("Skip external tests for now")
+
+	// Arrange
+	ctx, cancel := context.WithCancel(context.Background())
+	const count = 25
+	err := make(chan error)
+	errorMsg := ""
+	options := httpwriter.HttpWriterOptions{
+		ErrorFunc: func(s string, e error) {
+			errorMsg = s
+			err <- e
+		},
+		BufferCapacity: 3,
+		BatchSize:      5,
+		HttpEndpoint:   "http://localhost:8888/",
+	}
+	w, _ := httpwriter.New(ctx, &options)
+	jsonHandler := slog.NewJSONHandler(w, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})
+	logger := slog.New(jsonHandler)
+	msg := "SLog -> FluentBit"
+
+	// Act
+	for i := 0; i < count; i++ {
+		logger.Info(fmt.Sprintf("%s : %d", msg, i), slog.Int("counter", i))
+	}
+	time.Sleep(1 * time.Second)
+	cancel()
+
+	// Assert
+	verify.That(t, errorMsg).IsEmpty()
 }
