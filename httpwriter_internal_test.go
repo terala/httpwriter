@@ -85,3 +85,32 @@ func Test_write_buffer_size_via_env(t *testing.T) {
 	verify.That(t, err).IsNil()
 	verify.That(t, opt.WriteBufferSize).IsEqualTo(val)
 }
+
+func Test_bad_env_vars(t *testing.T) {
+	// Arrange
+	var tests = []struct {
+		name       string
+		env_name   string
+		env_value  string
+		err_string string
+	}{
+		{"invalid_buffer_capcity", "HTTP_WRITER_BUFFER_CAPACITY", "invalid", "strconv.Atoi"},
+		{"invalid_batch_size", "HTTP_WRITER_BATCH_SIZE", "invalid", "strconv.Atoi"},
+		{"invalid_max_idle_conn", "HTTP_WRITER_MAX_IDLE_CONNECTIONS", "invalid", "strconv.Atoi"},
+		{"invalid_writer_buffer_size", "HTTP_WRITER_WRITE_BUFFER_SIZE", "invalid", "strconv.Atoi"},
+		{"invalid_idle_conn_timeout", "HTTP_WRITER_IDLE_CONN_TIMEOUT", "invalid", "time: invalid duration"},
+	}
+	for _, bat := range tests {
+		t.Run(bat.name, func(tt *testing.T) {
+			// Arrange
+			tt.Setenv(bat.env_name, bat.env_value)
+
+			// Act
+			_, err := defaultConfig()
+
+			// Assert
+			verify.That(tt, err).IsNotNil()
+			verify.That(tt, err.Error()).StartsWith(bat.err_string)
+		})
+	}
+}
