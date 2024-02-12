@@ -61,7 +61,7 @@ func defaultConfig() (*HttpWriterOptions, error) {
 
 	// Update base options from environment.
 	if val := os.Getenv("HTTP_WRITER_ENDPOINT"); val != "" {
-		u, err := url.Parse(val)
+		u, err := url.ParseRequestURI(val)
 		if err != nil {
 			return nil, err
 		}
@@ -105,7 +105,7 @@ func New(ctx context.Context, options *HttpWriterOptions) (*HttpWriter, error) {
 	opt, err := defaultConfig()
 	if options != nil {
 		if options.HttpEndpoint != "" {
-			u, err := url.Parse(options.HttpEndpoint)
+			u, err := url.ParseRequestURI(options.HttpEndpoint)
 			if err != nil {
 				return nil, err
 			}
