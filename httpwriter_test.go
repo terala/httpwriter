@@ -237,9 +237,13 @@ func (s *HttpWriterTestSuite) Test_error_func_is_invoked_upon_errors() {
 			}
 
 			// Act
-			w, _ := httpwriter.New(s.ctx, &options)
-			_, _ = w.Write([]byte("{\"key\":\"value\"}"))
-			er := <-err // Wait until error is available.
+			w, er := httpwriter.New(s.ctx, &options)
+			if er != nil {
+				msg = er.Error()
+			} else {
+				_, _ = w.Write([]byte("{\"key\":\"value\"}"))
+				er = <-err // Wait until error is available.
+			}
 			s.cancel()
 
 			// Assert
@@ -280,9 +284,12 @@ func (s *HttpWriterTestSuite) Test_slog_integration() {
 func (s *HttpWriterTestSuite) Test_is_cancellable_by_context() {
 	// Arrange
 	options := httpwriter.HttpWriterOptions{
-		BatchSize:      5,
-		BufferCapacity: 250,
-		HttpEndpoint:   s.mockServer.URL,
+		BatchSize:          5,
+		BufferCapacity:     250,
+		HttpEndpoint:       s.mockServer.URL,
+		MaxIdleConnections: 5,
+		IdleConnTimeout:    10,
+		WriteBufferSize:    100,
 	}
 	w, _ := httpwriter.New(s.ctx, &options)
 	jsonHandler := slog.NewJSONHandler(w, &slog.HandlerOptions{
