@@ -1,0 +1,51 @@
+name: PR Merge Workflow
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      - name: Build
+        run: go build -v github.com/terala/httpwriter ./...
+
+      - name: Run Tests
+        run: go test -v -coverprofile=./coverage.out github.com/terala/httpwriter ./...
+
+      - name: Generate coverage.html
+        run: go tool cover -html=./coverage.out -o ./coverage.html
+
+      - name: Upload coverage.html
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage.html
+          path: ./coverage.html
+
+      - name: Verify coverage
+        uses: vladopajic/go-test-coverage@v2.9.0
+        with:
+          profile: coverage.out
+          threshold-file: 85
+          threshold-package: 85
+          threshold-total: 90
+
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v4.0.0
+
